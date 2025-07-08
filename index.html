@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini와 함께하는 날씨 비교 (Netlify 버전)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans KR', sans-serif; }
+        .loader { border: 4px solid #f3f3f3; border-radius: 50%; border-top: 4px solid #3498db; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .hidden { display: none; }
+    </style>
+</head>
+<body class="bg-blue-50 flex items-center justify-center min-h-screen p-4">
+
+    <div class="bg-white border-2 border-blue-300 rounded-2xl shadow-lg p-6 sm:p-8 max-w-2xl w-full text-center">
+        <h1 class="text-4xl sm:text-5xl font-black text-blue-900 leading-tight mb-4">
+            <span class="flex items-baseline justify-center gap-x-1"><span>어제</span><span class="text-3xl sm:text-4xl font-semibold">보다</span><span>오늘</span></span>
+        </h1>
+        <p class="text-gray-600 mb-2">
+            <span class="font-bold">📍 현재 위치:</span> <span id="location-display">위치 정보 로딩 중...</span> (<span id="time-display">--:--</span> 기준)
+        </p>
+        <div id="manual-location-container" class="mt-2 hidden">
+            <input type="text" id="manual-location-input" placeholder="도시 이름 입력 (예: 서울)" class="border rounded-md p-2 w-full sm:w-2/3">
+            <button id="manual-location-btn" class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-lg mt-2 sm:mt-0 sm:ml-2 transition-colors">확인</button>
+        </div>
+        <p id="error-message" class="text-red-500 text-sm mt-1 mb-2 hidden"></p>
+        <div class="bg-gray-100 rounded-lg p-3 mb-6">
+            <h3 class="font-bold text-gray-700 text-sm mb-1">오늘의 현재 이 시각 날씨</h3>
+            <div class="flex items-center justify-center gap-x-2">
+                <span id="weather-icon" class="text-3xl">🤔</span>
+                <span id="weather-description" class="text-lg font-semibold text-gray-800">날씨 정보 로딩 중...</span>
+            </div>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full border-collapse" id="weather-table">
+                <thead>
+                    <tr class="bg-gray-100">
+                        <th class="border border-gray-300 p-3 text-sm sm:text-base font-bold text-gray-700">날짜</th>
+                        <th class="border border-gray-300 p-3 text-sm sm:text-base font-bold text-gray-700">평균 기온 (°C)</th>
+                        <th class="border border-gray-300 p-3 text-sm sm:text-base font-bold text-gray-700">체감 온도 (°C)</th>
+                        <th class="border border-gray-300 p-3 text-sm sm:text-base font-bold text-gray-700">풍속 (m/s)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td class="border border-gray-300 p-3"><span class="font-bold">어제</span><br><span id="yesterday-date" class="text-sm text-gray-500"></span></td>
+                        <td id="yesterday-temp" class="border border-gray-300 p-3 text-lg">-</td>
+                        <td id="yesterday-feels-like" class="border border-gray-300 p-3 text-lg">-</td>
+                        <td id="yesterday-wind-speed" class="border border-gray-300 p-3 text-lg">-</td>
+                    </tr>
+                    <tr class="bg-yellow-100">
+                        <td class="border border-gray-300 p-3 font-bold"><span>오늘</span><br><span id="today-date" class="text-sm text-gray-600"></span></td>
+                        <td id="today-temp" class="border border-gray-300 p-3 text-xl font-bold text-red-600">-</td>
+                        <td id="today-feels-like" class="border border-gray-300 p-3 text-xl font-bold text-red-600">-</td>
+                        <td id="today-wind-speed" class="border border-gray-300 p-3 text-xl font-bold text-blue-600">-</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p id="comparison-message" class="text-red-500 text-2xl font-bold mt-8 mb-6">날씨 정보를 비교 중입니다...</p>
+        <div class="flex flex-col sm:flex-row gap-4 justify-center">
+            <button id="clothing-suggestion-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 opacity-50 cursor-not-allowed" disabled>✨ 오늘 뭐 입을까?</button>
+            <button id="activity-suggestion-btn" class="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-300 opacity-50 cursor-not-allowed" disabled>✨ 오늘 뭐 할까?</button>
+        </div>
+        <div id="suggestion-container" class="mt-6 hidden">
+            <div id="loader" class="loader hidden"></div>
+            <div id="suggestion-result" class="text-left bg-gray-50 p-4 rounded-lg border border-gray-200 whitespace-pre-wrap"></div>
+        </div>
+    </div>
+
+    <script>
+        // --- DOM Element References ---
+        const clothingBtn = document.getElementById('clothing-suggestion-btn');
+        const activityBtn = document.getElementById('activity-suggestion-btn');
+        const suggestionContainer = document.getElementById('suggestion-container');
+        const loader = document.getElementById('loader');
+        const suggestionResult = document.getElementById('suggestion-result');
+        const locationDisplay = document.getElementById('location-display');
+        const timeDisplay = document.getElementById('time-display');
+        const weatherIcon = document.getElementById('weather-icon');
+        const weatherDescription = document.getElementById('weather-description');
+        const yesterdayDateEl = document.getElementById('yesterday-date');
+        const todayDateEl = document.getElementById('today-date');
+        const errorMessageEl = document.getElementById('error-message');
+        const manualLocationContainer = document.getElementById('manual-location-container');
+        const manualLocationInput = document.getElementById('manual-location-input');
+        const manualLocationBtn = document.getElementById('manual-location-btn');
+        const yesterdayTempEl = document.getElementById('yesterday-temp');
+        const yesterdayFeelsLikeEl = document.getElementById('yesterday-feels-like');
+        const yesterdayWindSpeedEl = document.getElementById('yesterday-wind-speed');
+        const todayTempEl = document.getElementById('today-temp');
+        const todayFeelsLikeEl = document.getElementById('today-feels-like');
+        const todayWindSpeedEl = document.getElementById('today-wind-speed');
+        const comparisonMessageEl = document.getElementById('comparison-message');
+        
+        // --- API Keys are now on the server (Netlify Function) ---
+
+        window.onload = function() {
+            updateDateTime();
+            getLocation();
+            manualLocationBtn.addEventListener('click', () => {
+                const location = manualLocationInput.value.trim();
+                if (location) {
+                    errorMessageEl.classList.add('hidden');
+                    manualLocationContainer.classList.add('hidden');
+                    fetchAndDisplayWeather(location, location);
+                } else {
+                    showError("도시 이름을 입력해주세요.");
+                }
+            });
+        };
+
+        function updateDateTime() {
+            const now = new Date();
+            const yesterday = new Date(now);
+            yesterday.setDate(now.getDate() - 1);
+            const options = { weekday: 'short' };
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            timeDisplay.textContent = `${hours}:${minutes}`;
+            const formatDate = (date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')} (${date.toLocaleDateString('ko-KR', options)})`;
+            todayDateEl.textContent = formatDate(now);
+            yesterdayDateEl.textContent = formatDate(yesterday);
+        }
+
+        function getLocation() {
+            if (navigator.geolocation) {
+                locationDisplay.textContent = "브라우저의 위치 정보 권한을 허용해주세요...";
+                navigator.geolocation.getCurrentPosition(handlePositionSuccess, handleLocationError, { timeout: 10000 });
+            } else {
+                handleLocationError({ code: -1, message: "이 브라우저에서는 위치 정보를 지원하지 않습니다." });
+            }
+        }
+
+        async function handlePositionSuccess(position) {
+            const { latitude, longitude } = position.coords;
+            const locationQuery = `${latitude},${longitude}`;
+            const koreanLocationName = await getKoreanLocationName(latitude, longitude);
+            fetchAndDisplayWeather(locationQuery, koreanLocationName);
+        }
+
+        async function getKoreanLocationName(lat, lon) {
+            const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&accept-language=ko`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) return null;
+                const data = await res.json();
+                const address = data.address;
+                const city = address.city || address.town || address.county || '';
+                const suburb = address.suburb || '';
+                return (city && suburb && city !== suburb) ? `${city} ${suburb}` : city || null;
+            } catch (error) {
+                console.error("Error fetching Korean location name:", error);
+                return null;
+            }
+        }
+
+        async function fetchAndDisplayWeather(query, koreanName = null) {
+            locationDisplay.textContent = "날씨 정보 로딩 중...";
+            weatherIcon.textContent = '🤔';
+            weatherDescription.textContent = '날씨 정보 로딩 중...';
+
+            try {
+                const response = await fetch('/.netlify/functions/weather', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'weather', query: query })
+                });
+                
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || "날씨 정보를 가져오는 데 실패했습니다.");
+                }
+
+                const todayData = data.today;
+                const yesterdayData = data.yesterday;
+
+                locationDisplay.textContent = koreanName || todayData.location.name;
+                const { emoji, desc } = getEmoji(todayData.current.condition.text);
+                weatherIcon.textContent = emoji;
+                weatherDescription.textContent = desc;
+
+                const todayTemp = todayData.current.temp_c;
+                const todayFeels = todayData.current.feelslike_c;
+                const todayWindMps = (todayData.current.wind_kph / 3.6).toFixed(1);
+                
+                const yesterdayForecast = yesterdayData.forecast.forecastday[0];
+                const yesterdayTemp = yesterdayForecast.day.avgtemp_c;
+                const yesterdayWindMps = (yesterdayForecast.day.maxwind_kph / 3.6).toFixed(1);
+                const yesterdayFeelsLikeAvg = yesterdayForecast.hour.reduce((sum, hour) => sum + hour.feelslike_c, 0) / yesterdayForecast.hour.length;
+
+                todayTempEl.textContent = todayTemp.toFixed(1);
+                todayFeelsLikeEl.textContent = todayFeels.toFixed(1);
+                todayWindSpeedEl.textContent = todayWindMps;
+                yesterdayTempEl.textContent = yesterdayTemp.toFixed(1);
+                yesterdayFeelsLikeEl.textContent = yesterdayFeelsLikeAvg.toFixed(1);
+                yesterdayWindSpeedEl.textContent = yesterdayWindMps;
+
+                if (todayTemp > yesterdayTemp) comparisonMessageEl.innerHTML = "오늘이 더 더워요 🔥";
+                else if (todayTemp < yesterdayTemp) comparisonMessageEl.innerHTML = "어제가 더 더웠어요 🌙";
+                else comparisonMessageEl.innerHTML = "어제와 오늘 기온이 비슷해요 😐";
+                
+                enableButtons();
+
+            } catch (error) {
+                console.error("Weather fetch error:", error);
+                showError(error.message);
+                handleLocationError();
+            }
+        }
+
+        function getEmoji(condition) {
+            if (!condition) return { emoji: '❓', desc: '알 수 없음' };
+            const lc = condition.toLowerCase(); 
+            const ko = condition; 
+
+            if (lc.includes("fog") || lc.includes("mist") || lc.includes("haze") || ko.includes("안개")) return { emoji: "🌫️", desc: "안개/옅은 안개" };
+            if (lc.includes("sunny") || lc.includes("clear") || ko.includes("맑음")) return { emoji: "☀️", desc: "맑음" };
+            if (lc.includes("partly") && lc.includes("cloud")) return { emoji: "⛅", desc: "구름 조금" };
+            if (lc.includes("cloudy") || ko.includes("흐림")) return { emoji: "☁️", desc: "흐림" };
+            if (lc.includes("overcast") || ko.includes("구름 많음")) return { emoji: "🌥️", desc: "구름 많음" };
+            if (lc.includes("patchy rain") || lc.includes("light rain") || ko.includes("가벼운 비")) return { emoji: "🌦️", desc: "약한 비" };
+            if (lc.includes("rain") || ko.includes("비")) return { emoji: "🌧️", desc: "비" };
+            if (lc.includes("snow") && lc.includes("light") || ko.includes("가벼운 눈")) return { emoji: "🌨️", desc: "약한 눈" };
+            if (lc.includes("snow") || ko.includes("눈")) return { emoji: "❄️", desc: "눈" };
+            if (lc.includes("thunder") || ko.includes("뇌우")) return { emoji: "⛈️", desc: "천둥 번개" };
+            
+            return { emoji: "🌡️", desc: condition };
+        }
+
+        function handleLocationError(error) {
+            let message = "위치 정보를 가져올 수 없습니다. 수동으로 도시를 입력해주세요.";
+            if (error) {
+                switch(error.code) {
+                    case error.PERMISSION_DENIED: message = "위치 정보 접근 권한이 거부되었습니다. 수동으로 도시를 입력해주세요."; break;
+                    case error.POSITION_UNAVAILABLE: message = "현재 위치 정보를 사용할 수 없습니다. 수동으로 도시를 입력해주세요."; break;
+                    case error.TIMEOUT: message = "위치 정보를 가져오는 데 시간이 초과되었습니다. 수동으로 도시를 입력해주세요."; break;
+                }
+            }
+            showError(message);
+            locationDisplay.textContent = "위치 확인 불가";
+            manualLocationContainer.classList.remove('hidden');
+        }
+
+        function showError(message) {
+            errorMessageEl.textContent = message;
+            errorMessageEl.classList.remove('hidden');
+        }
+
+        function enableButtons() {
+            [clothingBtn, activityBtn].forEach(btn => {
+                btn.disabled = false;
+                btn.classList.remove("opacity-50", "cursor-not-allowed");
+            });
+        }
+
+        clothingBtn.addEventListener('click', () => handleSuggestion('clothing'));
+        activityBtn.addEventListener('click', () => handleSuggestion('activity'));
+
+        function handleSuggestion(type) {
+            const temp = todayTempEl.innerText;
+            const feelsLike = todayFeelsLikeEl.innerText;
+            const windSpeed = todayWindSpeedEl.innerText;
+            const location = locationDisplay.innerText;
+            const weather = weatherDescription.innerText;
+            let prompt;
+            if (type === 'clothing') {
+                prompt = `현재 ${location}의 기온이 ${temp}°C, 체감온도는 ${feelsLike}°C, 풍속은 ${windSpeed}m/s이고, 날씨는 '${weather}' 입니다. 이 날씨에 남성과 여성이 입기 좋은 옷차림을 각각 추천해주세요. 답변은 한국어로, 간단하고 명료하게 항목으로 구분해서 제안해줘.`;
+            } else {
+                prompt = `현재 ${location}의 기온이 ${temp}°C, 체감온도는 ${feelsLike}°C, 풍속은 ${windSpeed}m/s이고, 날씨는 '${weather}' 입니다. 이 날씨와 대기상태를 고려하여 오늘 하기 좋은 즐거운 실내 활동 2가지와 실외 활동 1가지를 추천해주세요. 답변은 한국어로, 각 활동에 대한 간단한 이유를 포함해서 항목으로 구분해줘.`;
+            }
+            getGeminiSuggestion(prompt);
+        }
+
+        async function getGeminiSuggestion(prompt) {
+            suggestionContainer.classList.remove('hidden');
+            loader.classList.remove('hidden');
+            suggestionResult.classList.add('hidden');
+            suggestionResult.innerText = '';
+            
+            try {
+                const response = await fetch('/.netlify/functions/weather', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ type: 'gemini', prompt: prompt })
+                });
+                
+                const result = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(result.error || `추천 생성 중 오류가 발생했습니다.`);
+                }
+
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content.parts[0].text) {
+                    suggestionResult.innerText = result.candidates[0].content.parts[0].text;
+                } else if (result.promptFeedback && result.promptFeedback.blockReason) {
+                    suggestionResult.innerText = `죄송합니다. 요청이 차단되었습니다. (이유: ${result.promptFeedback.blockReason})\n다른 질문으로 시도해주세요.`;
+                } else {
+                    throw new Error("API 응답에서 유효한 내용을 찾을 수 없습니다.");
+                }
+            } catch (error) {
+                console.error("Gemini API 호출 중 오류 발생:", error);
+                suggestionResult.innerText = `죄송합니다. 추천을 생성하는 데 문제가 발생했습니다. 잠시 후 다시 시도해주세요. (${error.message})`;
+            } finally {
+                loader.classList.add('hidden');
+                suggestionResult.classList.remove('hidden');
+            }
+        }
+    </script>
+
+</body>
+</html>
