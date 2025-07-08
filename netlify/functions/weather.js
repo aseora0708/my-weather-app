@@ -1,6 +1,5 @@
 const WEATHER_API_KEY = process.env.WEATHER_API_KEY;
-
-// GEMINI_API_KEY 관련 부분을 임시로 삭제했습니다.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 exports.handler = async (event) => {
     if (event.httpMethod !== 'POST') {
@@ -9,7 +8,6 @@ exports.handler = async (event) => {
     try {
         const body = JSON.parse(event.body);
         const { type } = body;
-
         if (type === 'weather') {
             const { query } = body;
             if (!query) {
@@ -20,9 +18,7 @@ exports.handler = async (event) => {
             const yesterdayStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
             const urlToday = `https://api.weatherapi.com/v1/current.json?key=${WEATHER_API_KEY}&q=${query}&lang=ko`;
             const urlYesterday = `https://api.weatherapi.com/v1/history.json?key=${WEATHER_API_KEY}&q=${query}&dt=${yesterdayStr}&lang=ko`;
-
             const [todayRes, yesterdayRes] = await Promise.all([fetch(urlToday), fetch(urlYesterday)]);
-
             if (!todayRes.ok || !yesterdayRes.ok) {
                 console.error('Weather API Error:', await todayRes.text(), await yesterdayRes.text());
                 return { statusCode: 502, body: JSON.stringify({ error: "날씨 API 서버에서 응답을 받지 못했습니다. API 키가 유효한지 확인해주세요." }) };
@@ -36,9 +32,30 @@ exports.handler = async (event) => {
                 statusCode: 200,
                 body: JSON.stringify({ today: todayData, yesterday: yesterdayData }),
             };
+        } else if (type === 'gemini') {
+            const { prompt } = body;
+            if (!prompt) {
+                return { statusCode: 400, body: JSON.stringify({ error: "프롬프트(prompt)가 필요합니다." }) };
+            }
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`;
+            const payload = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+             if (!response.ok) {
+                const errorBody = await response.text();
+                console.error('Gemini API Error:', errorBody);
+                return { statusCode: response.status, body: JSON.stringify({ error: `API 요청 실패: ${response.status} ${response.statusText}. Gemini API 키를 확인해주세요.` }) };
+            }
+            const result = await response.json();
+             return {
+                statusCode: 200,
+                body: JSON.stringify(result),
+            };
         } else {
-            // Gemini 관련 요청은 임시로 에러 처리합니다.
-            return { statusCode: 400, body: JSON.stringify({ error: 'Gemini 기능은 임시로 비활성화되었습니다.' }) };
+            return { statusCode: 400, body: JSON.stringify({ error: '잘못된 요청 타입입니다.' }) };
         }
     } catch (error) {
         console.error('Function Error:', error);
